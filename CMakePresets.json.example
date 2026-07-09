@@ -1,0 +1,83 @@
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "msvc-debug-vcpkg",
+            "displayName": "Windows x64 Debug (vcpkg)",
+            "description": "vcpkg 管理模式: Qt6 + whisper-cpp 全部由 vcpkg 提供。首次使用需执行 vcpkg install。",
+            "generator": "Visual Studio 17 2022",
+            "binaryDir": "${sourceDir}/build/msvc-debug-vcpkg",
+            "toolchainFile": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
+            "cacheVariables": {
+                "USE_VCPKG": "ON"
+            }
+        },
+        {
+            "name": "msvc-release-vcpkg",
+            "displayName": "Windows x64 Release (vcpkg)",
+            "description": "vcpkg 管理模式 — Release 优化构建",
+            "generator": "Visual Studio 17 2022",
+            "binaryDir": "${sourceDir}/build/msvc-release-vcpkg",
+            "toolchainFile": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
+            "cacheVariables": {
+                "USE_VCPKG": "ON"
+            }
+        },
+        {
+            "name": "msvc-debug-manual",
+            "displayName": "Windows x64 Debug (手动 Qt, 无 vcpkg)",
+            "description": "手动管理模式: 使用官方 Qt 安装器, whisper.cpp 从 third_party/whisper/ 加载。",
+            "generator": "Visual Studio 17 2022",
+            "binaryDir": "${sourceDir}/build/msvc-debug-manual",
+            "cacheVariables": {
+                "USE_VCPKG": "OFF",
+                "CMAKE_PREFIX_PATH": "C:/Qt/6.5.0/msvc2019_64"
+            }
+        },
+        {
+            "name": "msvc-release-manual",
+            "displayName": "Windows x64 Release (手动 Qt, 无 vcpkg)",
+            "description": "手动管理模式 — Release 优化构建",
+            "generator": "Visual Studio 17 2022",
+            "binaryDir": "${sourceDir}/build/msvc-release-manual",
+            "cacheVariables": {
+                "USE_VCPKG": "OFF",
+                "CMAKE_PREFIX_PATH": "C:/Qt/6.5.0/msvc2019_64"
+            }
+        },
+        {
+            "name": "mingw-debug-manual",
+            "displayName": "Windows x64 Debug (MinGW + 手动 Qt)",
+            "description": "使用 MinGW 编译器 + 官方 Qt MinGW 版本。不需要 vcpkg。",
+            "generator": "MinGW Makefiles",
+            "binaryDir": "${sourceDir}/build/mingw-debug-manual",
+            "cacheVariables": {
+                "USE_VCPKG": "OFF",
+                "CMAKE_PREFIX_PATH": "C:/Qt/6.5.0/mingw_64",
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug-vcpkg",
+            "configurePreset": "msvc-debug-vcpkg",
+            "configuration": "Debug"
+        },
+        {
+            "name": "release-vcpkg",
+            "configurePreset": "msvc-release-vcpkg",
+            "configuration": "Release"
+        },
+        {
+            "name": "debug-manual",
+            "configurePreset": "msvc-debug-manual",
+            "configuration": "Debug"
+        },
+        {
+            "name": "release-manual",
+            "configurePreset": "msvc-release-manual",
+            "configuration": "Release"
+        }
+    ]
+}

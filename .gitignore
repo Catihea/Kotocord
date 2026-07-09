@@ -14,9 +14,15 @@ cmake_install.cmake
 CTestTestfile.cmake
 Makefile
 *.cmake
-!CMakePresets.json
 CMakeUserPresets.json
 CMakeSettings.json
+
+# ==========================================
+# CMakePresets — 每人本地维护自己的配置
+# CMakePresets.json.example 是模板 (提交)
+# CMakePresets.json 是本地配置 (忽略)
+# ==========================================
+CMakePresets.json
 
 # ==========================================
 # 可执行文件输出目录

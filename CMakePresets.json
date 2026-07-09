@@ -3,24 +3,24 @@
     "configurePresets": [
         {
             "name": "msvc-debug",
-            "displayName": "Windows x64 Debug (vcpkg + MSVC)",
-            "description": "使用 vcpkg 工具链, Visual Studio 2022, Debug 配置",
+            "displayName": "Windows x64 Debug (vcpkg)",
+            "description": "vcpkg 管理模式: Qt6 + whisper-cpp 全部由 vcpkg 提供",
             "generator": "Visual Studio 17 2022",
             "binaryDir": "${sourceDir}/build/msvc-debug",
             "toolchainFile": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
             "cacheVariables": {
-                "CMAKE_CXX_STANDARD": "17"
+                "USE_VCPKG": "ON"
             }
         },
         {
             "name": "msvc-release",
-            "displayName": "Windows x64 Release (vcpkg + MSVC)",
-            "description": "使用 vcpkg 工具链, Visual Studio 2022, Release 配置",
+            "displayName": "Windows x64 Release (vcpkg)",
+            "description": "vcpkg 管理模式 — Release 优化构建",
             "generator": "Visual Studio 17 2022",
             "binaryDir": "${sourceDir}/build/msvc-release",
             "toolchainFile": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
             "cacheVariables": {
-                "CMAKE_CXX_STANDARD": "17"
+                "USE_VCPKG": "ON"
             }
         }
     ],

@@ -1,75 +1,53 @@
 # KotoCord (V1.0)
 
-## 项目简介
+面向 VRChat 无言势及 VTuber 的综合性直播辅助工具。集成语音识别（STT）、大语言模型（LLM）情绪分析与虚拟形象驱动，将语音/文本输入转化为带有情绪色彩的艺术字字幕。
 
-本项目旨在开发一款面向 VRChat 无言势及 VTuber 的综合性直播辅助工具。
-核心目标是通过集成语音识别（Speech-to-Text, STT）、大语言模型（Large Language Model, LLM）情绪分析与虚拟形象驱动，
-将用户的语音或文本输入转化为带有情绪色彩的艺术字字幕，并实时驱动 Live2D/VRM 虚拟形象的表情，从而增强直播的互动性和表现力。
+---
+
+## 目录
+
+- [架构概览](#架构概览)
+- [项目文件结构](#项目文件结构)
+- [两种部署模式](#两种部署模式)
+- [前置条件](#前置条件)
+- [模式 A：vcpkg 自动管理 (新 PC / CI)](#模式-avcpkg-自动管理)
+- [模式 B：手动 Qt + third_party (旧 PC / 已有 Qt)](#模式-b手动-qt--third_party)
+- [构建与运行](#构建与运行)
+- [Qt Creator 集成](#qt-creator-集成)
+- [运行时部署 (分发给他人)](#运行时部署)
+- [vcpkg 编译提速](#vcpkg-编译提速)
+- [跨平台](#跨平台)
+- [常见问题](#常见问题)
+- [致谢](#致谢)
 
 ---
 
 ## 架构概览
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                    UI 层 (MainWindow)                  │
-│              显示字幕、情绪标签、系统监控数据             │
-└──────────────┬───────────────────────────┬────────────┘
-               │                           │
-         字幕帧信号                    CPU/MEM/延迟数据
-               │                           │
-┌──────────────▼──────────┐   ┌────────────▼───────────┐
-│    AppController        │   │  SystemResourceMonitor  │
-│  字幕队列 / 视觉锁       │   │  系统资源周期性采样        │
-└──────────┬──────────────┘   └────────────────────────┘
-           │
-    ┌──────┴──────────┐
-    │                 │
-    ▼                 ▼
-┌───────────┐   ┌───────────┐
-│  ASR 语音  │   │  LLM 情绪  │
-│  识别引擎  │   │  分析引擎  │
-│           │   │           │
-│ Vosk /    │   │ MockLLM / │
-│ Whisper   │   │ DeepSeek  │
-└─────┬─────┘   └─────┬─────┘
-      │               │
-      ▼               ▼
-┌───────────┐   ┌───────────┐
-│AudioCapture│   │ Kaomoji   │
-│ (麦克风)    │   │ Manager   │
-└────────────┘   │ (颜文字)   │
-                 └───────────┘
+麦克风 → AudioCapture → [VoskTranscriber / WhisperTranscriber]
+                                    ↓
+                            AppController (队列 + 视觉锁)
+                                    ↓
+                 [MockLLMWorker / DeepSeekAPIWorker]
+                                    ↓
+                      SubtitleFrame (情绪 + 文本)
+                                    ↓
+                              MainWindow → 屏幕渲染
 ```
 
-### 模块划分
+### 模块职责
 
 | 目录 | 职责 |
 |---|---|
-| `src/core/` | 核心控制器 (`AppController`) 与公用数据类型 (`DataTypes.h`) |
-| `src/ui/` | Qt 主窗口 (`MainWindow`) |
-| `src/modules/input/` | 语音识别抽象层：`VoskTranscriber` / `WhisperTranscriber` / `IAudioTranscriber` 接口 |
-| `src/modules/capture/` | 音频采集：`AudioCapture` (麦克风) / `AudioFileSimulator` (文件模拟) |
-| `src/modules/llm/` | 大语言模型：`DeepSeekAPIWorker` / `MockLLMWorker` / `KaomojiManager` |
-| `src/modules/render/` | 字幕渲染：`SubtitleRenderer` |
-| `src/modules/system/` | 系统监控：`SystemResourceMonitor` |
-| `src/utils/` | 工具类：`AppPaths` (资源路径解析) |
-
-### 数据流
-
-```
-麦克风 → AudioCapture → [PCM原始数据]
-                           ↓
-           VoskTranscriber / WhisperTranscriber
-                           ↓
-              AppController (队列调度 + 视觉锁)
-                           ↓
-           MockLLMWorker / DeepSeekAPIWorker
-                           ↓
-              SubtitleFrame (带回情绪标签)
-                           ↓
-              MainWindow → 屏幕渲染
-```
+| `src/core/` | `AppController` 核心调度、`DataTypes.h` 公用类型 |
+| `src/ui/` | Qt 主窗口 (含 `.ui` 设计师文件) |
+| `src/modules/input/` | ASR 抽象层 (`IAudioTranscriber`) + Vosk/Whisper 实现 |
+| `src/modules/capture/` | 音频采集 (`AudioCapture` 麦克风 / `AudioFileSimulator` 调试) |
+| `src/modules/llm/` | LLM 抽象层 + DeepSeek API / Mock + `KaomojiManager` 颜文字 |
+| `src/modules/render/` | 字幕渲染 (`SubtitleRenderer`) |
+| `src/modules/system/` | 系统资源监控 (`SystemResourceMonitor`) |
+| `src/utils/` | `AppPaths` 统一资源路径 |
 
 ---
 
@@ -77,101 +55,105 @@
 
 ```
 Kotocord/
-│
-├── CMakeLists.txt               # 构建系统 (vcpkg 工具链)
-├── CMakePresets.json             # 一键构建配置
+├── CMakeLists.txt                     # 双模式构建脚本 (提交)
+├── CMakePresets.json.example          # Preset 模板 (提交, 新人复制用)
+├── CMakePresets.json                  # 本地 Preset (不提交, 每人自己的)
+├── CMakeUserPresets.json              # 用户级覆盖 (可选, 不提交)
 ├── .gitignore
 ├── README.md
 ├── LICENSE
 │
-├── src/                          # 源码
-│   ├── main.cpp                  # 程序入口, 组件装配与信号连线
+├── src/                               # 源码 — 与部署模式零耦合
+│   ├── main.cpp
 │   ├── core/
-│   │   ├── AppController.h/.cpp  # 核心调度器 (字幕队列 + 视觉锁机制)
-│   │   └── DataTypes.h           # SubtitleFrame / EmotionType 定义
 │   ├── ui/
-│   │   ├── MainWindow.h/.cpp     # Qt 主窗口
-│   │   └── MainWindow.ui         # Qt Designer 界面文件
 │   ├── utils/
-│   │   └── AppPaths.h            # 统一资源路径解析
 │   └── modules/
-│       ├── input/                # 语音识别 (ASR)
-│       │   ├── IAudioTranscriber.h       # ASR 抽象接口
-│       │   ├── VoskTranscriber.h/.cpp    # Vosk 引擎 (离线, 轻量)
-│       │   └── WhisperTranscriber.h/.cpp # Whisper 引擎 (离线, 高精度)
-│       ├── capture/              # 音频采集
-│       │   ├── AudioCapture.h/.cpp       # Qt Multimedia 麦克风捕获
-│       │   └── AudioFileSimulator.h/.cpp # 文件模拟 (调试用)
-│       ├── llm/                  # 大语言模型 & 颜文字
-│       │   ├── ILanguageModel.h          # LLM 抽象接口
-│       │   ├── DeepSeekAPIWorker.h/.cpp  # DeepSeek API 实现
-│       │   ├── MockLLMWorker.h/.cpp      # 本地 Mock 实现 (调试用)
-│       │   └── KaomojiManager.h/.cpp     # 颜文字 情绪→表情映射
-│       ├── render/
-│       │   └── SubtitleRenderer.h/.cpp   # 字幕渲染 (含艺术字效果)
-│       └── system/
-│           └── SystemResourceMonitor.h/.cpp # CPU/MEM 周期采样
+│       ├── input/                     # ASR 引擎
+│       ├── capture/                   # 音频捕获
+│       ├── llm/                       # LLM + 颜文字
+│       ├── render/                    # 字幕渲染
+│       └── system/                    # 系统监控
 │
-├── third_party/                  # 手动管理的第三方库
-│   └── vosk/                     # Vosk 不在 vcpkg 中, 需手动准备
-│       ├── include/
-│       │   └── vosk_api.h
-│       └── lib/
-│           ├── libvosk.dll       # 运行时动态库
-│           └── vosk.lib          # MSVC 导入库
+├── third_party/
+│   └── vosk/                          # 手动依赖 (两种模式都需要)
+│       ├── include/vosk_api.h
+│       └── lib/                       # [不提交] DLL + .lib
+│           ├── libvosk.dll
+│           └── vosk.lib               # MSVC 导入库
 │
-├── resources/                    # 项目资源与模型文件
-│   ├── kaomoji.json              # 颜文字映射表
-│   ├── resources.qrc             # Qt 资源文件 (暂未启用)
-│   └── model/                    # [不纳入版本控制]
-│       ├── vosk-model-small-cn/  # Vosk 中文模型 (~40MB)
-│       └── ggml-small.bin        # Whisper 模型 (~500MB)
+├── resources/
+│   ├── kaomoji.json                   # 颜文字映射表 (提交)
+│   ├── resources.qrc
+│   └── model/                         # [不提交] 语音模型
+│       ├── vosk-model-small-cn-0.22/
+│       └── ggml-small.bin
 │
-├── build/                        # [不纳入版本控制] CMake 构建产物
-│   ├── msvc-debug/               # Debug 配置
-│   └── msvc-release/             # Release 配置
+├── build/                             # [不提交] CMake 构建中间产物
+├── bin/                               # [不提交] 可执行文件输出
+│   ├── Debug/Kotocord.exe
+│   └── Release/Kotocord.exe
 │
-└── bin/                          # [不纳入版本控制] 可执行文件输出
-    ├── Debug/
-    │   ├── Kotocord.exe          # ← 直接运行
-    │   └── *.dll                 # 自动部署的运行时依赖
-    └── Release/
-        ├── Kotocord.exe
-        └── *.dll
+└── .git/                              # [不提交] 版本控制
 ```
 
 ---
 
-## 依赖管理
+## 两种部署模式
 
-本项目采取 **vcpkg + 手动兜底** 的混合策略：
+本项目用**一个 CMakeLists.txt + 一个 `USE_VCPKG` 选项**支持两种环境，免除了分支维护的成本。
 
-| 依赖 | 管理方式 | CMake Target | 说明 |
-|---|---|---|---|
-| **Qt6 Widgets** | vcpkg (`qtbase`) | `Qt6::Widgets` | 跨平台 UI |
-| **Qt6 Multimedia** | vcpkg (`qtmultimedia`) | `Qt6::Multimedia` | 麦克风采集 |
-| **whisper.cpp** | vcpkg (`whisper-cpp`) | `whisper` | 高精度语音识别 |
-| **ggml** | vcpkg (whisper-cpp 自动拉取) | `ggml::ggml` | whisper 推理后端 |
-| **Vosk** | **手动** (`third_party/vosk/`) | `${VOSK_LIB}` | 不在 vcpkg 中 |
-| **Vosk 模型** | **手动下载** | N/A | 运行时按路径加载 |
-| **Whisper 模型** | **手动下载** | N/A | 运行时按路径加载 |
-| **DeepSeek API** | 无本地依赖 | N/A | 纯网络调用 |
+你的旧设备和新设备 clone 的是同一份代码。差异只在一处：
 
-> **为什么 Vosk 不用 vcpkg？** Vosk 官方没有提交到 vcpkg registry, 且其 Windows 预编译库使用 MinGW 工具链编译, 与 MSVC 工程直接链接存在 ABI 不兼容风险。保留手动管理可以精确控制导入库的生成方式。
+```
+CMakeLists.txt 第 ~30 行:
+─────────────────────────────────────
+option(USE_VCPKG "..." ON)   ← 默认 vcpkg 模式
+
+if(USE_VCPKG)
+    find_package(whisper CONFIG)   # vcpkg 提供
+else()
+    find_library(WHISPER_LIB ...)  # third_party/whisper/ 提供
+endif()
+─────────────────────────────────────
+src/ 目录下的所有源码、resources/、.gitignore 在两个模式间完全一样。
+```
+
+> **不推荐用分支拆分部署方式。** 分支适用的是代码级分叉（feature 开发），配置级差异用 `option()` + 本地 Preset 解决。
+
+### 模式速查
+
+| | 模式 A: vcpkg | 模式 B: 手动 |
+|---|---|---|
+| **适用场景** | 全新 PC、CI 构建机、跨平台 | 旧 PC、C 盘空间不足、已有 Qt 安装 |
+| **Qt6 来源** | vcpkg 从源码编译 | 官方安装器 / 系统包管理器 |
+| **whisper.cpp** | vcpkg 管理，版本锁定 | `third_party/whisper/` 手动放置 |
+| **首次耗时** | 1–3 小时 | 10 分钟 |
+| **磁盘占用** | 20–30 GB | ~2 GB |
+| **Preset 例子** | `msvc-debug` (vcpkg) | `msvc-debug-manual` |
+| **`USE_VCPKG`** | `ON` | `OFF` |
 
 ---
 
-## 部署方式 A：vcpkg (推荐)
+## 前置条件
 
-适合新电脑、有足够磁盘空间 (C 盘 ≥ 50GB 空闲)、希望跨平台一致的场景。
+两种模式都需要：
 
-### 前置条件
+- **Git**
+- **CMake 3.16+**
+- **编译器** — 以下任选一种：
+  - Visual Studio 2022 (含 "使用 C++ 的桌面开发" 工作负载)
+  - MinGW-w64 (通过 MSYS2 或 Qt 安装器附带)
+- **Vosk 预编译库** — `third_party/vosk/lib/` 下需有 `libvosk.dll` 和 MSVC 导入库 `vosk.lib`。详见 [模式 A 步骤 3](#3-准备-vosk-两种模式都需要)。
+- **语音模型文件**：
+  - Vosk 中文模型 → `resources/model/vosk-model-small-cn-0.22/`
+  - Whisper 模型 → `resources/model/ggml-small.bin`
 
-- Visual Studio 2022 (含 "使用 C++ 的桌面开发" 工作负载)
-- Git
-- CMake 3.16+
+---
 
-### 步骤 1：安装 vcpkg
+## 模式 A：vcpkg 自动管理
+
+### 1. 安装 vcpkg
 
 ```powershell
 git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
@@ -179,35 +161,40 @@ cd C:\vcpkg
 .\bootstrap-vcpkg.bat
 ```
 
-> **💡 C 盘空间不足？** 如果你想把 vcpkg 放到其他盘（如 D 盘），只需把路径改为 `D:\vcpkg`。但请注意后续 `CMakePresets.json` 中的 `toolchainFile` 路径也需要同步修改。
+> **C 盘空间不足？** 克隆到其他盘即可（如 `D:\vcpkg`），但需同步修改 Preset 中的 `toolchainFile` 路径。
 
-### 步骤 2：安装项目依赖 (仅首次)
+### 2. 安装项目依赖 (仅首次, 约 1–3 小时)
 
 ```powershell
 cd C:\vcpkg
 .\vcpkg install qtbase[windeployqt] qtmultimedia[widgets] whisper-cpp
 ```
 
-**重要说明 — 编译时间：**
+Qt6 需要从源码编译，首次很慢。详见 [vcpkg 编译提速](#vcpkg-编译提速)。
 
-Qt6 需要 **从源码编译**, 首次安装约 **1–3 小时**, 占用 **20–30 GB 磁盘空间**（主要是 `buildtrees/` 编译中间产物）。这是 vcpkg 的"入场费"——只需要付一次。
+### 3. 准备 Vosk (两种模式都需要)
 
-`windeployqt` 功能会在构建后自动将 Qt6 运行时 DLL 复制到 exe 目录，无需手动操作。
+Vosk 不在 vcpkg 中，必须手动准备。
 
-### 步骤 3：准备 Vosk
+**下载：**
 
-Vosk 不在 vcpkg 中, 需手动准备。
+从 [Vosk Releases](https://github.com/alphacep/vosk-api/releases) 下载 `vosk-win64-0.3.45.zip`（或更新版本）。
 
-1. 从 [Vosk Releases](https://github.com/alphacep/vosk-api/releases) 下载 `vosk-win64-x.x.x.zip`
-2. 将 `libvosk.dll`, `libgcc_s_seh-1.dll`, `libstdc++-6.dll`, `libwinpthread-1.dll` 放入 `third_party/vosk/lib/`
-3. 将 `vosk_api.h` 放入 `third_party/vosk/include/` (项目已包含此头文件)
-4. **生成 MSVC 导入库** (Vosk 使用 MinGW 编译, 其 `.lib` 不能直接用于 MSVC)：
+**解压后放入 `third_party/vosk/lib/` 的文件：**
+
+| 文件 | 说明 |
+|---|---|
+| `libvosk.dll` | Vosk 运行时库 |
+| `libgcc_s_seh-1.dll` | MinGW GCC 运行时 |
+| `libstdc++-6.dll` | MinGW C++ 标准库 |
+| `libwinpthread-1.dll` | MinGW POSIX 线程库 |
+
+**生成 MSVC 导入库：**
+
+Vosk 是 MinGW 编译的，附带 `.lib` 无法用于 MSVC。需用 VS 的 `lib.exe` 重新生成：
 
 ```powershell
-# 找到 VS2022 的 lib.exe (路径中 MSVC 版本号可能不同)
-$libExe = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\lib.exe"
-
-# 创建 .def 文件 (导出 Vosk 的 C API 符号)
+# 创建 DEF 文件 (Vosk C API 符号列表)
 @"
 EXPORTS
 vosk_model_new
@@ -233,293 +220,290 @@ vosk_gpu_thread_init
 vosk_free
 "@ | Out-File -FilePath "third_party\vosk\lib\libvosk.def" -Encoding ascii
 
-# 生成 MSVC 兼容的导入库
-& $libExe /def:third_party\vosk\lib\libvosk.def /machine:x64 /out:third_party\vosk\lib\vosk.lib
+# 用 MSVC lib.exe 生成导入库
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\lib.exe" `
+    /def:third_party\vosk\lib\libvosk.def /machine:x64 /out:third_party\vosk\lib\vosk.lib
 ```
 
-> **注意：** CMakeLists.txt 中 `find_library` 查找的是 `vosk` 或 `libvosk`。这里生成 `vosk.lib` 即可被 CMake 识别。
+> **MinGW 用户**：如果使用 MinGW 编译器（模式 B + `mingw-debug-manual` Preset），可以直接使用 zip 中附带的 `libvosk.lib`，不需要上述导入库生成步骤。
 
-### 步骤 4：下载模型文件
-
-模型文件是运行时按路径加载的，不参与编译。
-
-- **Vosk 中文模型**：从 [alphacephei.com/vosk/models](https://alphacephei.com/vosk/models) 下载 `vosk-model-small-cn-0.22.zip`, 解压至 `resources/model/vosk-model-small-cn-0.22/`
-- **Whisper 模型**：从 [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) 下载 `ggml-small.bin`, 放置于 `resources/model/`
-
-### 步骤 5：配置 CMakePresets.json
-
-项目根目录的 `CMakePresets.json` 已预先配置好。**如果你的 vcpkg 不在 `C:\vcpkg`，需要修改 `toolchainFile` 路径。**
-
-```json
-{
-    "toolchainFile": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
-    //               ^^^^^^^ 改为你的 vcpkg 安装路径
-}
-```
-
-### 步骤 6：构建
+### 4. 配置本地 Preset
 
 ```powershell
-# Debug (开发调试用)
-cmake --preset msvc-debug
-cmake --build build/msvc-debug --config Debug
-
-# Release (发布用)
-cmake --preset msvc-release
-cmake --build build/msvc-release --config Release
+cp CMakePresets.json.example CMakePresets.json
 ```
 
-### 步骤 7：运行
+编辑 `CMakePresets.json`，确认 `toolchainFile` 指向你的 vcpkg 路径。模板中的预设名 `msvc-debug-vcpkg` 和 `msvc-release-vcpkg` 可直接使用。
 
-产物位置：
-```
-bin/Debug/Kotocord.exe    (Debug)
-bin/Release/Kotocord.exe  (Release)
-```
-
-**直接双击 exe 即可运行，无需手动拷贝任何 DLL。** `windeployqt` 和 CMake post-build 脚本已自动把所有运行时依赖部署到 exe 所在目录。
+### 5. 构建与运行
 
 ```powershell
-# 也可以通过命令行启动查看日志
-.\bin\Debug\Kotocord.exe
+# Debug
+cmake --preset msvc-debug-vcpkg
+cmake --build build/msvc-debug-vcpkg --config Debug
+
+# Release
+cmake --preset msvc-release-vcpkg
+cmake --build build/msvc-release-vcpkg --config Release
 ```
+
+产物位置：`bin/Debug/Kotocord.exe` 或 `bin/Release/Kotocord.exe`。直接双击运行即可，所有 DLL 已在构建时自动部署。
 
 ---
 
-## 部署方式 B：手动管理 (无 vcpkg)
+## 模式 B：手动 Qt + third_party
 
-适合旧电脑（C 盘空间不足、不想花数小时编译 Qt）、使用 Qt 官方安装器的场景。
+此模式不依赖 vcpkg，适合旧电脑或已有 Qt 安装的设备。**同一份代码，只在 Preset 中改一个选项。**
 
-### 前置条件
+### 1. third_party 目录结构
 
-- Visual Studio 2022 或 MinGW-w64
-- [Qt 6.x 官方安装器](https://www.qt.io/download) (安装时勾选 MSVC 或 MinGW 版本，以及 Multimedia 模块)
-- CMake 3.16+
-
-### 步骤 1：准备第三方库
+需在项目根目录下手动准备：
 
 ```
 third_party/
 ├── vosk/
-│   ├── include/vosk_api.h
-│   └── lib/
+│   ├── include/vosk_api.h              ← 提交
+│   └── lib/                            ← 不提交
 │       ├── libvosk.dll
-│       ├── libvosk.lib          # MinGW 项目直接用这个
-│       └── vosk.lib             # MSVC 项目需按方式 A 步骤 3 生成
-└── whisper/
+│       └── vosk.lib                    (MSVC) 或 libvosk.lib (MinGW)
+│
+└── whisper/                            ← 不提交
     ├── include/
-    │   └── whisper.h             # 从 whisper.cpp 项目获取
-    └── lib/
-        ├── whisper.dll           # 从 whisper.cpp Releases 下载
-        ├── whisper.lib
-        └── ggml/                 # ggml 头文件与库
-            ├── include/          # 全部 ggml-*.h 头文件
-            └── lib/              # ggml.dll, ggml-cpu.dll, ggml-base.dll
+    │   └── whisper.h
+    ├── lib/
+    │   ├── whisper.dll
+    │   └── whisper.lib
+    └── ggml/
+        ├── include/
+        │   └── ggml.h, ggml-cpu.h ...  (全部 ggml 头文件)
+        └── lib/
+            ├── ggml.dll
+            ├── ggml-cpu.dll
+            ├── ggml-base.dll
+            └── ggml.lib
 ```
 
-### 步骤 2：构建 (无 CMakePresets)
+### 2. 安装 Qt6
 
-手动传递 Qt 路径给 CMake：
+通过 [Qt 官方安装器](https://www.qt.io/download) 安装，选择 MSVC 或 MinGW 版本，勾选 **Multimedia** 模块。记录安装路径，例如 `C:\Qt\6.5.0\msvc2019_64`。
+
+### 3. 配置本地 Preset
 
 ```powershell
-cd Kotocord
-
-# MSVC 示例 (Qt 安装路径按实际情况修改)
-cmake -B build -G "Visual Studio 17 2022" `
-  -DCMAKE_PREFIX_PATH="C:\Qt\6.x.x\msvc2019_64" `
-  -DCMAKE_CXX_STANDARD=17
-
-cmake --build build --config Debug
+cp CMakePresets.json.example CMakePresets.json
 ```
 
-```bash
-# MinGW 示例 (Qt 安装路径按实际情况修改)
-cmake -B build -G "MinGW Makefiles" \
-  -DCMAKE_PREFIX_PATH="/c/Qt/6.x.x/mingw_64" \
-  -DCMAKE_CXX_STANDARD=17
+编辑 `CMakePresets.json`，**保留手动模式的预设**，删掉不需要的。关键是将 `CMAKE_PREFIX_PATH` 指向你的 Qt 安装目录：
 
-cmake --build build
+```json
+{
+    "name": "msvc-debug-manual",
+    "cacheVariables": {
+        "USE_VCPKG": "OFF",
+        "CMAKE_PREFIX_PATH": "C:/Qt/6.5.0/msvc2019_64"   // ← 改成你的路径
+    }
+}
 ```
 
-> **注意：** 手动模式下，CMakeLists.txt 中 `find_package(whisper CONFIG)` 会失败（因为没有 vcpkg 提供的 whisper-config.cmake）。你需要改用旧版 CMakeLists.txt（见下述"无 vcpkg 的 CMakeLists.txt 备选"），或自行编写 whisper 的 Find 模块。
+> **旧电脑上已有旧 Preset？** 直接复制模板中的 `msvc-debug-manual` 预设块，粘贴到现有 `CMakePresets.json` 中即可。`CMakePresets.json` 支持多个预设并列。
+
+### 4. 构建与运行
+
+```powershell
+# MSVC 手动模式
+cmake --preset msvc-debug-manual
+cmake --build build/msvc-debug-manual --config Debug
+
+# MinGW 手动模式 (如果装了 MinGW 版 Qt)
+cmake --preset mingw-debug-manual
+cmake --build build/mingw-debug-manual
+```
+
+> **注意：** 手动模式下 whisper/ggml/Vosk 的 DLL 会自动从 `third_party/` 拷贝到输出目录。但 **Qt 平台插件**（`platforms/qwindows.dll`）不会自动部署。建议在 Qt Creator 中运行（它会自动处理），或手动运行 windeployqt：
+> ```powershell
+> C:\Qt\6.5.0\msvc2019_64\bin\windeployqt.exe bin\Debug\Kotocord.exe
+> ```
 
 ---
 
-## 💡 vcpkg 编译时间与加速方案
+## 构建与运行
 
-Qt6 源码编译是 vcpkg 部署中最耗时的环节。以下是实测数据和加速策略：
+### 所有可用预设
 
-| 策略 | 效果 | 操作复杂度 |
+| 预设名 | 模式 | 编译器 |
 |---|---|---|
-| **什么都不做** (从源码编译) | 基准: 1–3 小时 | 无 |
-| **使用二进制缓存 (推荐)** | 秒级安装 (从缓存拉取) | 中 — 需要配置缓存服务 |
-| **只装需要的模块** (`qtbase[widgets]` 而非全量 `qt6`) | 减少约 30% 编译量 | 无 (本项目已采用) |
-| **多核编译** (vcpkg 默认已开) | 充分利用 CPU | 无 |
+| `msvc-debug-vcpkg` | vcpkg | MSVC |
+| `msvc-release-vcpkg` | vcpkg | MSVC |
+| `msvc-debug-manual` | 手动 | MSVC |
+| `msvc-release-manual` | 手动 | MSVC |
+| `mingw-debug-manual` | 手动 | MinGW |
 
-### 使用 vcpkg 二进制缓存
-
-vcpkg 支持将已编译的包缓存到本地目录或远程服务。首次编译后，`packages/` 下会保留编译产物。重装系统前备份以下目录：
-
-```
-C:\vcpkg\packages\     ← 编译完成的包
-C:\vcpkg\archives\     ← vcpkg 自动归档缓存
-```
-
-恢复时将这两个目录放回原位，下次 `vcpkg install` 会直接命中缓存，跳过编译。
-
-团队协作时可搭建 NuGet 或 S3 远程缓存，参考 [vcpkg Binary Caching 文档](https://learn.microsoft.com/en-us/vcpkg/users/binarycaching)。
-
-### 使用环境变量加速
+### 命令速查
 
 ```powershell
-# 允许 vcpkg 使用更多 CPU 核心编译
-$env:VCPKG_MAX_CONCURRENCY = 8
+# 首次 configure
+cmake --preset <预设名>
 
-# 如果内存充足, 启用并行安装
-$env:VCPKG_INSTALL_OPTIONS = "--x-use-aria2"
+# 后续 build (增量编译, 很快)
+cmake --build build/<目录> --config Debug
+
+# 清理重编译
+cmake --build build/<目录> --config Debug --clean-first
+
+# 完全重置 (删 build 目录重来)
+Remove-Item -Recurse -Force build\<目录>
+cmake --preset <预设名>
+cmake --build build/<目录> --config Debug
+```
+
+### 产物位置
+
+```
+bin/
+├── Debug/
+│   ├── Kotocord.exe
+│   ├── *.dll               ← 自动部署
+│   ├── platforms/
+│   │   └── qwindowsd.dll   ← Qt 平台插件 (必须)
+│   ├── styles/
+│   ├── imageformats/
+│   ├── tls/
+│   └── multimedia/
+└── Release/
+    └── ... (同上)
 ```
 
 ---
 
-## Qt Creator 集成 vcpkg
+## Qt Creator 集成
 
-即使使用 vcpkg 管理 Qt，你依然可以（也应该）使用 Qt Creator 进行开发，特别是 `.ui` 文件的可视化编辑。
+无论哪种模式，都可以用 Qt Creator 做开发和 `.ui` 可视化编辑。
 
-### 配置 Kit
+### vcpkg 模式的 Kit 配置
 
-1. 打开 Qt Creator → **编辑 → Preferences → Qt Versions**
-2. 点击 **添加**，指向 vcpkg 安装的 qmake：
-   ```
-   C:\vcpkg\installed\x64-windows\tools\Qt6\bin\qmake.exe
-   ```
-3. **Kits** 标签页 → **添加**：
-   - 名称：`Kotocord (vcpkg MSVC)`
-   - Compiler：选 VS2022 的 MSVC
-   - Qt version：选步骤 2 注册的版本
-   - **CMake Toolchain File**：填 `C:\vcpkg\scripts\buildsystems\vcpkg.cmake`
-4. 保存
+1. **Qt Creator → 编辑 → Preferences → Qt Versions → 添加**
+   - qmake 路径：`C:\vcpkg\installed\x64-windows\tools\Qt6\bin\qmake.exe`
 
-### 打开项目
+2. **Kits → 添加**
+   - 名称：`Kotocord (vcpkg)`
+   - Qt version：选步骤 1 的版本
+   - CMake Toolchain File：`C:\vcpkg\scripts\buildsystems\vcpkg.cmake`
 
-`File → Open File or Project... →` 选择 `CMakeLists.txt` → 在 Kit 选择界面勾选 `Kotocord (vcpkg MSVC)` → 完成。
+3. **打开项目**：`File → Open → CMakeLists.txt → 选 Kotocord (vcpkg)`
 
-之后 Qt Creator 的所有功能（代码补全、调试、`.ui` 可视化编辑器）都正常工作。Qt Creator 只是 IDE，它通过 Kit 知道去 vcpkg 的安装目录找 Qt，和你用官方 Qt 安装器时的体验完全一样。
+### 手动模式的 Kit 配置
+
+Kit 指向你的官方 Qt 安装路径。不需要设置 toolchain file。
+
+> **旧电脑 Kit 不变**：你在旧电脑上已有的 Qt Creator Kit 不需要改动。clone 代码后，只需在 `CMakePresets.json` 中把 `USE_VCPKG` 设为 `OFF`，选择你已有的 Kit 即可。
 
 ---
 
-## 运行时部署 (分发给他人)
+## 运行时部署
 
-开发阶段的 `windeployqt` 已经自动把 DLL 拷贝到 `bin/` 下，你可以直接双击 exe 运行。但如果要把程序发给别人，需要确保以下几点：
+### 直接运行 (开发)
 
-### 完整运行包需包含
+构建完成后，exe 同级目录已包含所有 DLL + 插件。双击即可运行。
+
+### 分发给他人
 
 ```
-Kotocord/
+Kotocord-v0.1.0/
 ├── Kotocord.exe
-├── *.dll                    # windeployqt + post-build 自动部署
-├── resources/
-│   ├── kaomoji.json        # 颜文字映射 (必须)
-│   └── model/
-│       ├── vosk-model-small-cn-0.22/   # Vosk 模型 (必须, ~40MB)
-│       └── ggml-small.bin             # Whisper 模型 (必须, ~500MB)
-└── platforms/
-    └── qwindows.dll         # Qt 平台插件 (windeployqt 自动部署)
+├── *.dll                       # 构建自动部署
+├── platforms/                  # Qt 平台插件 (必须)
+│   └── qwindows.dll
+├── styles/                     # Windows 风格
+├── imageformats/               # 图片格式
+├── tls/                        # HTTPS (DeepSeek API)
+├── multimedia/                 # 音频采集
+└── resources/
+    ├── kaomoji.json            # 颜文字映射 (必须)
+    └── model/
+        ├── vosk-model-small-cn-0.22/   # Vosk 模型 (必须, ~40MB)
+        └── ggml-small.bin             # Whisper 模型 (必须, ~500MB)
 ```
 
-> **检查清单：**
-> - `bin/Debug/Kotocord.exe` 同级是否有一个 `platforms/` 文件夹？如果没有，说明 windeployqt 未正确运行。检查 CMake 输出日志中是否有 "deploying dependencies" 字样。
-> - `resources/model/` 下的模型文件必须存在，否则程序启动后 ASR 引擎无法初始化。
+**检查清单：**
+- [ ] exe 同级有 `platforms/qwindows.dll`（不是 `qwindowsd.dll`，Release 没有 `d` 后缀）
+- [ ] `resources/model/` 下有模型文件
+- [ ] 在未安装 Qt 的裸机上测试过双击运行
 
-### 生成独立安装包
+打包发布（Release）：
 
 ```powershell
-# 1. Release 构建
-cmake --preset msvc-release
-cmake --build build/msvc-release --config Release
-
-# 2. 将 bin/Release/ 整个目录打包
-# 其中已包含所有 DLL, 直接压缩为 zip 即可分发
-Compress-Archive -Path bin\Release\* -DestinationPath Kotocord-v0.1.0.zip
+cmake --preset msvc-release-vcpkg   # 或 msvc-release-manual
+cmake --build build/msvc-release-vcpkg --config Release
+# exe 在 bin/Release/，整个目录压缩即可分发
 ```
 
 ---
 
-## 跨平台构建
+## vcpkg 编译提速
 
-CMakeLists.txt 已预留 macOS 和 Linux 的分支逻辑。vcpkg 也支持这两个平台：
+| 策略 | 效果 | 操作 |
+|---|---|---|
+| **二进制缓存 (推荐)** | 二次安装秒级完成 | 备份 `C:\vcpkg\packages\` 和 `C:\vcpkg\archives\`，重装后放回 |
+| **只装需要的模块** | 减少约 30% 编译量 | 本项目已采用 (`qtbase[widgets]` 而非全量 `qt6`) |
+| **多核编译** | 充分利用 CPU | vcpkg 默认开启，无需配置 |
+| **NuGet / S3 远程缓存** | 团队共享编译产物 | 参考 [vcpkg Binary Caching](https://learn.microsoft.com/en-us/vcpkg/users/binarycaching) |
+
+---
+
+## 跨平台
+
+CMakeLists.txt 已预留 macOS 和 Linux 分支（DLL/dylib/so 拷贝逻辑、API 刷新等）。vcpkg 在 macOS 和 Linux 上的使用方式相同：
 
 ```bash
 # macOS
-brew install cmake
 git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
 cd ~/vcpkg && ./bootstrap-vcpkg.sh
-./vcpkg install qtbase[windeployqt] qtmultimedia[widgets] whisper-cpp
+./vcpkg install qtbase qtmultimedia[widgets] whisper-cpp
 
-# Linux (Ubuntu/Debian)
-sudo apt install build-essential cmake
+# Linux
+sudo apt install build-essential cmake  # 或等效
 git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
 cd ~/vcpkg && ./bootstrap-vcpkg.sh
 ./vcpkg install qtbase qtmultimedia[widgets] whisper-cpp
 ```
 
-具体 preset 待后续补充。核心 CMakeLists.txt 代码对平台差异已做处理（DLL/dylib/so 分支、API key 刷新等）。
-
----
-
-## 开发工作流速查
-
-```powershell
-# ===== 日常开发 (假设已完成首次部署) =====
-
-# 改完代码后:
-cmake --build build/msvc-debug --config Debug
-
-# 全新 clone 后首次构建:
-cmake --preset msvc-debug
-cmake --build build/msvc-debug --config Debug
-
-# Release 构建:
-cmake --preset msvc-release
-cmake --build build/msvc-release --config Release
-
-# 清理重编译:
-cmake --build build/msvc-debug --config Debug --clean-first
-
-# 完全重置:
-Remove-Item -Recurse -Force build\
-cmake --preset msvc-debug
-cmake --build build/msvc-debug --config Debug
-```
+跨平台 Preset 待后续补充。
 
 ---
 
 ## 常见问题
 
-### Q: vcpkg install 报错 "Could not find a package configuration file"
+### Q: "no Qt platform plugin" 错误
 
-A: 确认 triplet 匹配。Windows MSVC 默认 triplet 是 `x64-windows`。如果使用了其他 triplet，需要在 CMakePresets.json 中设置 `VCPKG_TARGET_TRIPLET`。
+A: `platforms/qwindows.dll` 缺失。确认 bin 目录下有 `platforms/` 文件夹。vcpkg 模式下构建会自动部署；手动模式下请运行一次 `windeployqt`。
 
-### Q: CMake configure 报错 "Vosk library not found"
+### Q: CMake configure 报 "Vosk library not found"
 
-A: 检查 `third_party/vosk/lib/` 下是否有 `vosk.lib` 或 `libvosk.lib`。如果是 MinGW 版的 `.lib`，需要用 MSVC `lib.exe` 重新生成（见部署方式 A 步骤 3）。
+A: `third_party/vosk/lib/` 下缺少 `vosk.lib`。MSVC 需用 `lib.exe` 从 MinGW DLL 生成导入库（见模式 A 步骤 3）。
 
-### Q: 运行时提示 "无法加载 Vosk 模型"
+### Q: 运行时 "无法加载 Vosk 模型"
 
-A: 检查 `resources/model/vosk-model-small-cn-0.22/` 目录是否存在且包含模型文件（至少应有 `am/` 和 `conf/` 子目录）。路径由 `src/utils/AppPaths.h` 定义。
+A: `resources/model/vosk-model-small-cn-0.22/` 不存在或路径不对。检查 `src/utils/AppPaths.h` 中的路径定义。
 
-### Q: 运行时提示 "Whisper 模型未正确初始化"
+### Q: 运行时 "Whisper 模型未正确初始化"
 
-A: 检查 `resources/model/ggml-small.bin` 文件是否存在。
+A: `resources/model/ggml-small.bin` 不存在。
 
-### Q: `third_party/whisper/` 目录为什么还在？
+### Q: `CMakePresets.json` 修改后为什么 git 不追踪了？
 
-A: 迁移到 vcpkg 后，`third_party/whisper/` 不再被 CMakeLists.txt 引用。它保留仅仅是为了兼容旧分支或作为头文件参考。确认不需要后可安全删除。
+A: 这是设计如此。`.gitignore` 忽略了 `CMakePresets.json`。每个开发者从 `CMakePresets.json.example` 复制后自行修改。模板文件 `.example` 是提交的。
+
+### Q: 旧电脑已有可用的 Qt Creator 工程，clone 后会冲突吗？
+
+A: 不会。你的 `.pro.user` 文件在 `.gitignore` 中。clone 后在新电脑上直接用 Qt Creator 打开 `CMakeLists.txt`，选择对应的 Kit 即可。
+
+### Q: vcpkg 安装的 Qt 和官方 Qt 可以共存吗？
+
+A: 可以。它们在不同目录下（`C:\vcpkg\installed\` vs `C:\Qt\`），互不干扰。Kit 配置决定了用哪个。
 
 ---
 
-## 开源协议与致谢
-
-Kotocord 的诞生离不开以下优秀的开源项目：
+## 致谢
 
 | 项目 | 用途 | 协议 |
 |---|---|---|
@@ -527,5 +511,3 @@ Kotocord 的诞生离不开以下优秀的开源项目：
 | [Vosk API](https://alphacephei.com/vosk/) | 离线流式语音识别 | Apache 2.0 |
 | [Whisper.cpp](https://github.com/ggml-org/whisper.cpp) | 高精度语音识别引擎 | MIT |
 | [vcpkg](https://vcpkg.io/) | C/C++ 包管理器 | MIT |
-
-感谢这些伟大的开发者为开源社区做出的贡献！
