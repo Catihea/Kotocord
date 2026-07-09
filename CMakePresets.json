@@ -1,5 +1,39 @@
 {
     "version": 3,
-    "configurePresets": [],
-    "buildPresets": []
+    "configurePresets": [
+        {
+            "name": "msvc-debug",
+            "displayName": "Windows x64 Debug (vcpkg + MSVC)",
+            "description": "使用 vcpkg 工具链, Visual Studio 2022, Debug 配置",
+            "generator": "Visual Studio 17 2022",
+            "binaryDir": "${sourceDir}/build/msvc-debug",
+            "toolchainFile": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
+            "cacheVariables": {
+                "CMAKE_CXX_STANDARD": "17"
+            }
+        },
+        {
+            "name": "msvc-release",
+            "displayName": "Windows x64 Release (vcpkg + MSVC)",
+            "description": "使用 vcpkg 工具链, Visual Studio 2022, Release 配置",
+            "generator": "Visual Studio 17 2022",
+            "binaryDir": "${sourceDir}/build/msvc-release",
+            "toolchainFile": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
+            "cacheVariables": {
+                "CMAKE_CXX_STANDARD": "17"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "msvc-debug",
+            "configuration": "Debug"
+        },
+        {
+            "name": "release",
+            "configurePreset": "msvc-release",
+            "configuration": "Release"
+        }
+    ]
 }
