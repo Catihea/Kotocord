@@ -1,43 +1,117 @@
-# === C++ / Visual Studio / CMake 临时文件 ===
-.vs/
-.vscode/
-out/
-build/
-bin/
-CMakeSettings.json
-*.user
-launch.vs.json
-.editorconfig
-CMakeCache.txt
-
-# 忽略个人的机器路径配置
-#CMakePresets.json
-CMakeUserPresets.json
-VSCODE_DEV_GUIDE.md
+# ==========================================
+# Kotocord .gitignore
+# 适用: vcpkg + Qt6 + CMake + MSVC 项目
+# ==========================================
 
 # ==========================================
-# Qt 自动化生成的中间文件
+# CMake 构建产物 (不纳入版本控制)
+# ==========================================
+build*/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+*.cmake
+!CMakePresets.json
+CMakeUserPresets.json
+CMakeSettings.json
+
+# ==========================================
+# 可执行文件输出目录
+# ==========================================
+bin/
+out/
+
+# ==========================================
+# Visual Studio / MSVC
+# ==========================================
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+launch.vs.json
+.editorconfig
+
+# VS Code
+.vscode/
+
+# CLion
+.idea/
+
+# Qt Creator
+*.pro.user
+*.autosave
+CMakeLists.txt.user
+
+# ==========================================
+# Qt 自动化生成 (由 AUTOMOC/AUTOUIC/AUTORCC 产生)
 # ==========================================
 *_autogen/
 moc_*.cpp
+moc_*.h
 ui_*.h
 qrc_*.cpp
 *.moc
 
 # ==========================================
-# 操作系统缓存文件
+# vcpkg (本地安装, 各自独立)
 # ==========================================
-Thumbs.db
-.DS_Store
+vcpkg_installed/
+vcpkg-manifest-install/
+vcpkg-configuration.json
+vcpkg.json
 
-# === 第三方库的体积巨大文件 (非常重要) ===
-# 只上传 third_party 里的头文件(.h)，不上传库文件，让用户自己去下载
+# ==========================================
+# 第三方库文件 (体积巨大, 用户自行下载)
+# ==========================================
 third_party/**/*.dll
 third_party/**/*.lib
 third_party/**/*.a
 third_party/**/*.so
+third_party/**/*.dylib
+third_party/**/*.exp
+third_party/**/*.def
+third_party/**/*.pdb
+third_party/**/*.exe
 
-# === 语音模型文件 (绝对不能上传) ===
+# 保留头文件 (体积小, 便于 IDE 代码补全)
+!third_party/**/*.h
+
+# ==========================================
+# 模型文件 (绝对不能上传, 体积几百MB)
+# ==========================================
 resources/model/
+*.bin
 *.wav
 *.mp3
+
+# ==========================================
+# 操作系统缓存
+# ==========================================
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+Desktop.ini
+$RECYCLE.BIN/
+
+# ==========================================
+# 压缩包 (临时下载)
+# ==========================================
+*.zip
+*.tar.gz
+*.tar.xz
+*.7z
+*.rar
+
+# 但保留这个例外:
+!resources/**/*.zip
