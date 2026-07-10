@@ -55,15 +55,51 @@ else()
             "下载 whisper.cpp 预编译包, 解压至 third_party/whisper/")
     endif()
 
+    # whisper 主库
     find_library(WHISPER_LIB
         NAMES whisper
         PATHS "${WHISPER_DIR}/lib"
         NO_DEFAULT_PATH REQUIRED)
+
+    # ggml — 不同版本的 whisper.cpp 预编译包命名和布局不同:
+    #   旧版: ggml.lib 单独一个文件在 ggml/lib/ 或 lib/ 下
+    #   新版: 拆分为 ggml-base.lib + ggml-cpu.lib
+    #   有些包: ggml 符号直接编入 whisper.lib, 不提供单独的 ggml.lib
+    set(_GGML_SEARCH_DIRS "${WHISPER_DIR}/ggml/lib" "${WHISPER_DIR}/lib")
     find_library(GGML_LIB
         NAMES ggml
-        PATHS "${WHISPER_DIR}/ggml/lib"
-        NO_DEFAULT_PATH REQUIRED)
-    set(WHISPER_LIBS ${WHISPER_LIB} ${GGML_LIB})
+        PATHS ${_GGML_SEARCH_DIRS}
+        NO_DEFAULT_PATH)
+
+    if(NOT GGML_LIB)
+        find_library(GGML_BASE_LIB
+            NAMES ggml-base
+            PATHS ${_GGML_SEARCH_DIRS}
+            NO_DEFAULT_PATH)
+        find_library(GGML_CPU_LIB
+            NAMES ggml-cpu
+            PATHS ${_GGML_SEARCH_DIRS}
+            NO_DEFAULT_PATH)
+
+        if(GGML_BASE_LIB AND GGML_CPU_LIB)
+            set(GGML_LIB ${GGML_BASE_LIB} ${GGML_CPU_LIB})
+            message(STATUS "[Kotocord] ggml 分体式 (ggml-base + ggml-cpu)")
+        elseif(GGML_BASE_LIB)
+            set(GGML_LIB ${GGML_BASE_LIB})
+        endif()
+    endif()
+
+    if(GGML_LIB)
+        message(STATUS "[Kotocord] ggml 独立链接: ${GGML_LIB}")
+    else()
+        message(STATUS "[Kotocord] 未找到独立的 ggml 导入库, "
+                        "假定 ggml 符号已编入 whisper.lib (部分预编译包如此)")
+    endif()
+
+    set(WHISPER_LIBS ${WHISPER_LIB})
+    if(GGML_LIB)
+        list(APPEND WHISPER_LIBS ${GGML_LIB})
+    endif()
     message(STATUS "[Kotocord] whisper.cpp — 手动模式 (third_party/whisper/)")
 endif()
 

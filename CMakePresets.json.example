@@ -1,4 +1,25 @@
 {
+    "_comment": [
+        "====================================================================",
+        " CMakePresets.json 模板",
+        " 复制为 CMakePresets.json 后按自己的环境修改。",
+        "",
+        " 关键变量:",
+        "   USE_VCPKG = ON  → vcpkg 管理 Qt6 + whisper.cpp (需先执行 vcpkg install)",
+        "   USE_VCPKG = OFF → 手动模式: 设置 CMAKE_PREFIX_PATH 指向 Qt 安装目录,",
+        "                      whisper.cpp 从 third_party/whisper/ 加载",
+        "",
+        " 常见 Qt 路径参考:",
+        "   C:/Qt/6.5.0/msvc2019_64         ← Qt 6.5 MSVC (C盘默认)",
+        "   C:/Qt/6.9.0/msvc2022_64         ← Qt 6.9 MSVC",
+        "   H:/Software/Qt/Qt6.9.3/6.9.3/msvc2022_64  ← Qt 6.9 装在H盘 (旧电脑实录)",
+        "   D:/Qt/6.x.x/mingw_64            ← Qt MinGW 装在D盘",
+        "",
+        " vcpkg 路径参考:",
+        "   C:/vcpkg/scripts/buildsystems/vcpkg.cmake  ← vcpkg 默认路径",
+        "   D:/vcpkg/scripts/buildsystems/vcpkg.cmake  ← vcpkg 装在D盘 (C盘空间不足)",
+        "===================================================================="
+    ],
     "version": 3,
     "configurePresets": [
         {
