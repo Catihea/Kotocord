@@ -7,9 +7,14 @@
 
 class AppPaths {
 public:
-	//项目根目录
-	static QString getProjectRootDir() {//exe 在 bin/Debug 下，向上两级，起点"H:/.../Kotocord"
+	// 项目根目录 (自动适配开发和分发两种布局)
+	static QString getProjectRootDir() {
 		QString exeDir = QCoreApplication::applicationDirPath();
+		// 分发模式: resources/ 在 exe 同级目录
+		if (QDir(exeDir + "/resources").exists()) {
+			return exeDir;
+		}
+		// 开发模式: exe 在 bin/Debug 或 bin/Release，项目根在 ../..
 		return QDir::cleanPath(exeDir + "/../..");
 	}
 
@@ -29,6 +34,11 @@ public:
 
 	static QString getWhisperModelPath() {
 		return getResourcesDir() + "/model/ggml-small.bin";
+	}
+
+	// API Key 文件路径 (exe 同级目录，方便分发后用户编辑)
+	static QString getApiKeyFilePath() {
+		return QCoreApplication::applicationDirPath() + "/apikey.txt";
 	}
 };
 

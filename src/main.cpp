@@ -12,6 +12,8 @@
 #include "modules/llm/DeepSeekAPIWorker.h"
 #include "modules/llm/KaomojiManager.h"
 #include "modules/system/SystemResourceMonitor.h"
+#include <QFile>
+#include <QTextStream>
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);// 初始化 Qt 应用程序实例
@@ -29,6 +31,21 @@ int main(int argc, char* argv[]) {
 	AudioCapture micCapture;
 	MockLLMWorker mockLLM;
 	DeepSeekAPIWorker deepSeekLLM;
+
+	// 尝试从 exe 同级目录的 apikey.txt 加载 API Key (分发版本用)
+	QString apiKeyPath = AppPaths::getApiKeyFilePath();
+	if (QFile::exists(apiKeyPath)) {
+		QFile keyFile(apiKeyPath);
+		if (keyFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+			QString fileKey = QString::fromUtf8(keyFile.readAll()).trimmed();
+			if (!fileKey.isEmpty()) {
+				deepSeekLLM.setApiConfig(fileKey);
+				qDebug() << "[Main] API Key 已从文件加载:" << apiKeyPath;
+			}
+			keyFile.close();
+		}
+	}
+
 	KaomojiManager kaomojiManager;
 	SystemResourceMonitor sysMonitor;
 

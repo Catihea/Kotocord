@@ -7,8 +7,10 @@
 #include <QGuiApplication>
 #include <QRect>
 #include <QTimer>
+#include <QFile>
 
 #include "../core/AppController.h"
+#include "../utils/AppPaths.h"
 
 //简单的异或混淆(XOR) + Base64 加密算法
 static const char CRYPT_KEY = 0x5A; // 随便定一个魔法数字作为密钥
@@ -90,9 +92,22 @@ MainWindow::MainWindow(AppController* controller,QWidget* parent)
 	});
 
 	// 读取本地配置并触发信号
-	QSettings settings("MyStudio","Kotocord");
-	QString savedEncryptedKey = settings.value("API/DeepSeekKey","").toString();
-	QString plainKey = deobfuscateKey(savedEncryptedKey);
+	// 优先级: apikey.txt (分发版) > QSettings (开发机缓存)
+	QString plainKey;
+	QString apiKeyPath = AppPaths::getApiKeyFilePath();
+	if (QFile::exists(apiKeyPath)) {
+		QFile keyFile(apiKeyPath);
+		if (keyFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+			plainKey = QString::fromUtf8(keyFile.readAll()).trimmed();
+			keyFile.close();
+		}
+	}
+	if (plainKey.isEmpty()) {
+		// 文件不存在或为空 → 回退到 QSettings
+		QSettings settings("MyStudio","Kotocord");
+		plainKey = deobfuscateKey(settings.value("API/DeepSeekKey","").toString());
+	}
+
 	// 使用单次定时器将执行时机推迟到事件循环开始后，确保 main.cpp 已经完成了 connect
 	QTimer::singleShot(0,this,[this,plainKey]() {
 		if(!plainKey.isEmpty()) {
