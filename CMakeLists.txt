@@ -22,28 +22,35 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 # ==========================================
-# 2. 依赖管理模式选择
+# 2. 依赖管理模式
 # ==========================================
-#   ON  = vcpkg 模式: Qt6 + whisper.cpp 全部由 vcpkg 自动管理 (推荐新 PC / CI)
-#   OFF = 手动模式:  Qt6 通过 CMAKE_PREFIX_PATH 指定 (官方安装器);
-#                    whisper.cpp 从 third_party/whisper/ 手动加载
-option(USE_VCPKG "Use vcpkg to manage Qt6 and whisper-cpp dependencies" ON)
+#   USE_VCPKG_QT = ON  → Qt6 由 vcpkg 提供 (toolchain 自动设搜索路径)
+#                  OFF → Qt6 通过 CMAKE_PREFIX_PATH / Qt6_DIR 查找
+#   USE_VCPKG    = ON  → whisper 等其他库由 vcpkg 提供
+#                  OFF → 从 third_party/ 手动加载
+#
+#   四种组合:
+#     QT=ON  其它=ON  → 全新 PC, 全部 vcpkg
+#     QT=OFF 其它=OFF → 旧 PC, 官方 Qt + third_party
+#     QT=ON  其它=OFF → vcpkg 的 Qt, 但 whisper 用本地版本
+#     QT=OFF 其它=ON  → 官方 Qt, 其他库交给 vcpkg
+option(USE_VCPKG_QT "Use vcpkg for Qt6" ON)
+option(USE_VCPKG    "Use vcpkg for whisper.cpp and other libs" ON)
 
 # ==========================================
-# 3. Qt6 (两种模式共用 find_package, 只是搜索路径不同)
+# 3. Qt6
 # ==========================================
-#   vcpkg 模式: toolchain.cmake 自动设置 CMAKE_PREFIX_PATH → vcpkg/installed/
-#   手动模式:   开发者在 CMakePresets.json 中手动设置 CMAKE_PREFIX_PATH → Qt 安装目录
+#   USE_VCPKG_QT=ON  → toolchain.cmake 已将 vcpkg installed 加入搜索路径
+#   USE_VCPKG_QT=OFF → CMAKE_PREFIX_PATH / Qt6_DIR 指向官方安装
 find_package(Qt6 COMPONENTS Widgets Multimedia REQUIRED)
 
 # ==========================================
 # 4. whisper.cpp
 # ==========================================
 if(USE_VCPKG)
-    # --- vcpkg 模式: 通过 CMake config 包引入 ---
     find_package(whisper CONFIG REQUIRED)
-    set(WHISPER_LIBS whisper)                          # whisper 是 IMPORTED target
-    message(STATUS "[Kotocord] whisper.cpp — vcpkg 模式 (find_package)")
+    set(WHISPER_LIBS whisper)
+    message(STATUS "[Kotocord] whisper.cpp — vcpkg (find_package)")
 else()
     # --- 手动模式: 从 third_party/whisper/ 加载 ---
     set(WHISPER_DIR "${CMAKE_SOURCE_DIR}/third_party/whisper")
@@ -100,7 +107,13 @@ else()
     if(GGML_LIB)
         list(APPEND WHISPER_LIBS ${GGML_LIB})
     endif()
-    message(STATUS "[Kotocord] whisper.cpp — 手动模式 (third_party/whisper/)")
+    message(STATUS "[Kotocord] whisper.cpp — 手动 (third_party/whisper/)")
+endif()
+
+if(USE_VCPKG_QT)
+    message(STATUS "[Kotocord] Qt6 — vcpkg")
+else()
+    message(STATUS "[Kotocord] Qt6 — 手动 (CMAKE_PREFIX_PATH / Qt6_DIR)")
 endif()
 
 # ==========================================
@@ -215,7 +228,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # ==========================================
 if(WIN32)
 
-    # --- 10.1 Vosk DLL (含 MinGW 运行时) — 两种模式都需要 ---
+    # --- 10.1 Vosk DLL (含 MinGW 运行时) — 始终从 third_party 拷贝 ---
     if(EXISTS "${VOSK_DIR}/lib")
         file(GLOB _VOSK_DLLS "${VOSK_DIR}/lib/*.dll")
         if(_VOSK_DLLS)
@@ -228,10 +241,8 @@ if(WIN32)
         endif()
     endif()
 
-    if(USE_VCPKG)
-        # ==================== vcpkg 模式的自动部署 ====================
-
-        # 定位 vcpkg installed 目录
+    # --- 10.2 定位 vcpkg installed 目录 (当任一库使用 vcpkg 时) ---
+    if(USE_VCPKG_QT OR USE_VCPKG)
         foreach(_prefix ${CMAKE_PREFIX_PATH})
             if(EXISTS "${_prefix}/bin" AND EXISTS "${_prefix}/include")
                 set(_VCPKG_INSTALLED "${_prefix}")
@@ -243,8 +254,10 @@ if(WIN32)
         set(_DEBUG_BIN_DIR   "${_VCPKG_INSTALLED}/debug/bin")
         set(_RUNTIME_PLUGINS "${_VCPKG_INSTALLED}/Qt6/plugins")
         set(_DEBUG_PLUGINS   "${_VCPKG_INSTALLED}/debug/Qt6/plugins")
+    endif()
 
-        # whisper / ggml DLL
+    # --- 10.3 whisper / ggml DLL ---
+    if(USE_VCPKG)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<IF:$<CONFIG:Debug>,${_DEBUG_BIN_DIR},${_RUNTIME_BIN_DIR}>/whisper.dll"
@@ -260,8 +273,21 @@ if(WIN32)
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
             COMMENT "[Kotocord] Deploying whisper/ggml DLLs (vcpkg)..."
         )
+    else()
+        file(GLOB _WHISPER_DLLS "${WHISPER_DIR}/lib/*.dll")
+        file(GLOB _GGML_DLLS   "${WHISPER_DIR}/ggml/lib/*.dll")
+        if(_WHISPER_DLLS OR _GGML_DLLS)
+            add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${_WHISPER_DLLS} ${_GGML_DLLS}
+                    "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+                COMMENT "[Kotocord] Deploying whisper/ggml DLLs (manual third_party)..."
+            )
+        endif()
+    endif()
 
-        # Qt 插件目录 (vcpkg 模式下 windeployqt 可能遗漏)
+    # --- 10.4 Qt 平台插件 ---
+    if(USE_VCPKG_QT)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "$<IF:$<CONFIG:Debug>,${_DEBUG_PLUGINS},${_RUNTIME_PLUGINS}>/platforms"
@@ -280,23 +306,8 @@ if(WIN32)
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>/multimedia"
             COMMENT "[Kotocord] Deploying Qt plugin directories (vcpkg)..."
         )
-
     else()
-        # ==================== 手动模式的 DLL 部署 ====================
-
-        file(GLOB _WHISPER_DLLS "${WHISPER_DIR}/lib/*.dll")
-        file(GLOB _GGML_DLLS   "${WHISPER_DIR}/ggml/lib/*.dll")
-
-        if(_WHISPER_DLLS OR _GGML_DLLS)
-            add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    ${_WHISPER_DLLS} ${_GGML_DLLS}
-                    "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-                COMMENT "[Kotocord] Deploying whisper/ggml DLLs (manual)..."
-            )
-        endif()
-
-        message(STATUS "[Kotocord] 手动模式: Qt 插件请使用 windeployqt 或 Qt Creator 部署")
+        message(STATUS "[Kotocord] Qt 手动模式: Qt 插件请用 windeployqt 或 Qt Creator 部署")
     endif()
 
 elseif(APPLE)

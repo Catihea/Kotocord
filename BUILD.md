@@ -2,6 +2,7 @@
 
 ## 目录
 
+- [环境变量](#环境变量)
 - [两种构建模式](#两种构建模式)
 - [前置条件 (两种模式共用)](#前置条件)
 - [模式 A：vcpkg 全自动管理](#模式-avcpkg-全自动管理)
@@ -15,34 +16,82 @@
 
 ---
 
-## 两种构建模式
+## 环境变量
 
-项目使用 **一份 CMakeLists.txt + 一个 `USE_VCPKG` 开关** 支持两种环境。不需要维护多个分支。
+本项目 **不在配置文件中存储任何机器相关的绝对路径**。所有外部工具路径通过环境变量注入：
 
-| | 模式 A: vcpkg | 模式 B: 手动 |
+| 变量 | 用途 | 示例 |
 |---|---|---|
-| **适用场景** | 全新 PC、CI 构建、跨平台 | 旧 PC、已有 Qt 安装、C 盘空间不足 |
-| **Qt6 来源** | vcpkg 从源码编译 | 官方安装器 |
-| **whisper.cpp** | vcpkg 管理，版本锁定 | `third_party/whisper/` 手动放置 |
-| **首次耗时** | 1–3 小时 | 10 分钟 |
-| **磁盘占用** | 20–30 GB | ~2 GB |
-| **`USE_VCPKG`** | `ON` (默认) | `OFF` |
+| `VCPKG_ROOT` | vcpkg 安装目录 | `C:\vcpkg` |
+| `Qt6_DIR` | Qt6 MSVC 安装目录（仅手动模式） | `C:\Qt\6.5.0\msvc2019_64` |
+
+### 设置方法 (Windows)
+
+**永久 (推荐)：**  以管理员身份打开终端，每台机器执行一次：
+
+```powershell
+# vcpkg 模式用户 (新电脑)
+setx VCPKG_ROOT "C:\vcpkg"
+
+# 手动模式用户 (旧电脑)
+setx Qt6_DIR "H:\Software\Qt\Qt6.9.3\6.9.3\msvc2022_64"
+```
+
+> 路径改为你自己的安装位置。`setx` 设置后需**重新打开终端**才能在新窗口中生效。
+
+**临时 (仅当前终端)：**
+
+```powershell
+$env:VCPKG_ROOT = "C:\vcpkg"
+$env:Qt6_DIR    = "C:\Qt\6.5.0\msvc2019_64"
+```
+
+> 如果你在 VS Code 或 Qt Creator 的集成终端中设置，该设置仅在该 IDE 会话中有效。
+
+### 验证
+
+```powershell
+# 全部 vcpkg
+echo $env:VCPKG_ROOT
+cmake --preset msvc-debug-all-vcpkg
+
+# 全部手动
+echo $env:Qt6_DIR
+cmake --preset msvc-debug-all-manual
+
+# 混合: 官方 Qt + vcpkg 的 whisper
+echo $env:VCPKG_ROOT; echo $env:Qt6_DIR
+cmake --preset msvc-debug-qt-manual-whisper-vcpkg
+```
 
 ---
 
-## 前置条件 (两种模式共用)
+## 四种组合
 
-- **Git**
-- **CMake 3.16+**
+项目的 CMakeLists.txt 提供 **两个独立选项**, 不捆绑任何一个库:
+
+| `USE_VCPKG_QT` | `USE_VCPKG` | 场景 |
+|---|---|---|
+| ON | ON | 全新 PC, 全部 vcpkg |
+| OFF | OFF | 旧 PC, 官方 Qt + third_party 手动库 |
+| ON | OFF | vcpkg 的 Qt, 但 whisper 用本地自编译版本 |
+| OFF | ON | 官方 Qt, 只把 whisper 交给 vcpkg |
+
+> 需要 vcpkg toolchain 的预设必须设 `toolchainFile`。纯手动预设不需要 vcpkg 存在。
+> 同时使用 vcpkg 和官方 Qt 时, `CMAKE_PREFIX_PATH` 中官方 Qt 路径会优先于 vcpkg 的 Qt。
+
+---
+
+## 前置条件
+
+- **Git** + **CMake 3.16+**
 - **编译器**：Visual Studio 2022 (含 "使用 C++ 的桌面开发") 或 MinGW-w64
 - **Vosk 预编译库** — `third_party/vosk/lib/` 下需有运行时 DLL 和导入库
-- **语音模型文件**：
-  - Vosk 中文模型 → `resources/model/vosk-model-small-cn-0.22/`
-  - Whisper 模型 → `resources/model/ggml-small.bin`
+- **语音模型文件**：见 [模型文件准备](#a5-下载模型文件)
 
 ---
 
-## 模式 A：vcpkg 全自动管理
+## 场景 A：全部 vcpkg (Qt=vcpkg, Whisper=vcpkg)
 
 ### A1. 安装 vcpkg
 
@@ -52,16 +101,21 @@ cd C:\vcpkg
 .\bootstrap-vcpkg.bat
 ```
 
-> C 盘空间不足？克隆到 D 盘即可。之后修改 `CMakePresets.json` 中的 `toolchainFile` 路径。
-
-### A2. 安装项目依赖 (仅首次，约 1–3 小时)
+### A2. 设置环境变量
 
 ```powershell
-cd C:\vcpkg
+setx VCPKG_ROOT "C:\vcpkg"
+# 重新打开终端使其生效
+```
+
+### A3. 安装项目依赖 (仅首次，约 1–3 小时)
+
+```powershell
+cd $env:VCPKG_ROOT
 .\vcpkg install qtbase[windeployqt] qtmultimedia[widgets] whisper-cpp
 ```
 
-### A3. 准备 Vosk
+### A4. 准备 Vosk
 
 Vosk 不在 vcpkg 中，需手动下载。
 
@@ -111,31 +165,23 @@ vosk_free
 
 > **MinGW 用户**：使用 MinGW 编译器时可直接用 zip 中的 `libvosk.lib`，不需要上述步骤。
 
-### A4. 下载模型文件
+### A5. 构建
+
+```powershell
+cmake --preset msvc-debug-all-vcpkg
+cmake --build build/msvc-debug-all-vcpkg --config Debug
+```
+
+### A6. 下载模型文件 (运行时需要)
 
 - **Vosk 模型**：[vosk-model-small-cn-0.22.zip](https://alphacephei.com/vosk/models) → 解压到 `resources/model/vosk-model-small-cn-0.22/`
 - **Whisper 模型**：[ggml-small.bin](https://huggingface.co/ggerganov/whisper.cpp) → 放到 `resources/model/`
 
-### A5. 配置并构建
-
-```powershell
-cp CMakePresets.json.example CMakePresets.json
-# 编辑 CMakePresets.json，确认 toolchainFile 路径正确
-
-# Debug
-cmake --preset msvc-debug-vcpkg
-cmake --build build/msvc-debug-vcpkg --config Debug
-
-# Release
-cmake --preset msvc-release-vcpkg
-cmake --build build/msvc-release-vcpkg --config Release
 ```
-
-产物在 `bin/Debug/Kotocord.exe` 或 `bin/Release/Kotocord.exe`。所有 DLL（Qt、whisper、ggml、Vosk）和 Qt 插件目录（platforms、styles、imageformats、tls、multimedia）已在构建时自动部署到 exe 同级目录，双击即可运行。
 
 ---
 
-## 模式 B：手动 Qt + third_party
+## 场景 B：全部手动 (Qt=手动, Whisper=手动)
 
 不依赖 vcpkg。适合已有 Qt 安装的旧电脑。
 
@@ -174,49 +220,38 @@ third_party/
 
 ### B2. 安装 Qt6
 
-通过 [Qt 官方安装器](https://www.qt.io/download) 安装。勾选 **MSVC 或 MinGW** 版本 + **Multimedia** 模块。记下安装路径（如 `H:/Software/Qt/Qt6.9.3/6.9.3/msvc2022_64`）。
+通过 [Qt 官方安装器](https://www.qt.io/download) 安装。勾选 **MSVC 或 MinGW** 版本 + **Multimedia** 模块。记下安装路径。
 
-### B3. 配置 CMakePresets.json
+### B3. 设置环境变量
 
 ```powershell
-cp CMakePresets.json.example CMakePresets.json
-```
+# Qt MSVC 版:
+setx Qt6_DIR "H:\Software\Qt\Qt6.9.3\6.9.3\msvc2022_64"
 
-保留手动模式预设，确保两个关键变量正确：
-
-```json
-{
-    "name": "msvc-debug-manual",
-    "cacheVariables": {
-        "USE_VCPKG": "OFF",
-        "CMAKE_PREFIX_PATH": "你的Qt安装路径"
-    }
-}
+# Qt MinGW 版:
+setx Qt6_DIR "C:\Qt\6.5.0\mingw_64"
 ```
 
 ### B4. 构建
 
 ```powershell
-cmake --preset msvc-debug-manual
-cmake --build build/msvc-debug-manual --config Debug
+cmake --preset msvc-debug-all-manual
+cmake --build build/msvc-debug-all-manual --config Debug
 ```
-
-> **Qt 插件**：手动模式下 `platforms/qwindows.dll` 不会自动部署。请在 Qt Creator 中运行（它自动处理），或手动运行 `windeployqt`：
-> ```powershell
-> 你的Qt路径\bin\windeployqt.exe bin\Debug\Kotocord.exe
-> ```
 
 ---
 
 ## CMake 预设参考
 
-| 预设名 | 模式 | 编译器 | 说明 |
+| 预设名 | Qt | 其他库 | 编译器 |
 |---|---|---|---|
-| `msvc-debug-vcpkg` | vcpkg | MSVC | 新 PC 首选 |
-| `msvc-release-vcpkg` | vcpkg | MSVC | 发布构建 |
-| `msvc-debug-manual` | 手动 | MSVC | 旧 PC + 官方 Qt |
-| `msvc-release-manual` | 手动 | MSVC | 发布构建 |
-| `mingw-debug-manual` | 手动 | MinGW | MinGW 版 Qt |
+| `msvc-debug-all-vcpkg` | vcpkg | vcpkg | MSVC |
+| `msvc-release-all-vcpkg` | vcpkg | vcpkg | MSVC |
+| `msvc-debug-all-manual` | 手动 | 手动 | MSVC |
+| `msvc-release-all-manual` | 手动 | 手动 | MSVC |
+| `msvc-debug-qt-manual-whisper-vcpkg` | 手动 | vcpkg | MSVC |
+
+> 用户可根据需要自定义组合——只需在本地 `CMakePresets.json` 中复制一个预设，修改 `USE_VCPKG_QT` 和 `USE_VCPKG` 的值即可。
 
 ### 日常命令
 
@@ -313,7 +348,11 @@ cd ~/vcpkg && ./bootstrap-vcpkg.sh
 
 ### Q: "Could not find GGML_LIB" (旧电脑)
 
-ggml 的 `.lib` 文件缺失——某些 whisper.cpp 预编译包不带单独的 ggml 导入库。新版 CMakeLists.txt 已不再强制要求，会自动降级链接。如果仍有问题，运行 `dir /s third_party\whisper\*.lib` 检查实际文件。
+ggml 的 `.lib` 缺失——某些预编译包把 ggml 编入了 whisper.lib。CMakeLists.txt 会自动降级：找不到独立 ggml 就假定它在 whisper.lib 里。如果仍有问题，运行 `dir /s third_party\whisper\*.lib` 检查。
+
+### Q: 如何实现 "vcpkg 的 Qt + 本地自编译 whisper"？
+
+复制 `msvc-debug-all-vcpkg` 预设，将 `USE_VCPKG` 改为 `OFF`。whisper 会自动回退到 `third_party/whisper/` 加载。CMakeLists.txt 中 whisper 的发现逻辑独立于 Qt。
 
 ### Q: "Vosk library not found"
 

@@ -39,29 +39,30 @@
 
 ### 依赖
 
-| 依赖 | 用途 | 管理方式 |
+每个库 **独立可选** vcpkg 或手动管理:
+
+| 依赖 | vcpkg 选项 | 手动选项 |
 |---|---|---|
-| Qt 6 (Widgets, Multimedia) | UI + 音频采集 | vcpkg 或 官方安装器 |
-| whisper.cpp + ggml | 高精度语音识别 | vcpkg 或 `third_party/whisper/` |
-| Vosk API | 轻量流式语音识别 | `third_party/vosk/` (手动) |
-| DeepSeek API | LLM 情绪分析 | 纯网络, 无本地依赖 |
+| Qt 6 (Widgets, Multimedia) | `USE_VCPKG_QT=ON` | `USE_VCPKG_QT=OFF` + 官方安装器 |
+| whisper.cpp + ggml | `USE_VCPKG=ON` | `USE_VCPKG=OFF` + `third_party/whisper/` |
+| Vosk API | — | `third_party/vosk/` (始终手动) |
+| DeepSeek API | — | 纯网络, 无本地依赖 |
 
 ## 快速开始
 
 ```powershell
-# 新电脑 (vcpkg 模式)
-cp CMakePresets.json.example CMakePresets.json
-cmake --preset msvc-debug-vcpkg
-cmake --build build/msvc-debug-vcpkg --config Debug
+# 设环境变量 (每台机器一次)
+setx VCPKG_ROOT "C:\vcpkg"     # 如果用 vcpkg
+setx Qt6_DIR    "C:\Qt\..."    # 如果用官方 Qt (路径改为你自己的)
 
-# 旧电脑 (手动 Qt 模式)
-# 编辑 CMakePresets.json, 设 USE_VCPKG=OFF, CMAKE_PREFIX_PATH 指向你的 Qt
-cmake --preset msvc-debug-manual
-cmake --build build/msvc-debug-manual --config Debug
+# 构建 — 选一个 Preset
+cmake --preset msvc-debug-all-vcpkg                  # 全部 vcpkg
+cmake --preset msvc-debug-all-manual                 # 全部手动
+cmake --preset msvc-debug-qt-manual-whisper-vcpkg    # 官方 Qt + vcpkg whisper
+cmake --build build/msvc-debug-all-vcpkg --config Debug
 ```
 
-> 完整部署指南、旧电脑迁移步骤、运行时打包方法见 **[BUILD.md](BUILD.md)**。
-> IDE 配置实践记录见 **[DEV_GUIDE.md](DEV_GUIDE.md)**。
+> 完整指南见 **[BUILD.md](BUILD.md)**，IDE 配置实录见 **[DEV_GUIDE.md](DEV_GUIDE.md)**。
 
 ## 项目结构
 

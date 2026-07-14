@@ -65,7 +65,7 @@ int main(int argc, char* argv[]) {
 	bool isAsrEnabled = false; // 记录总开关状态
 
 	// ==========================================
-	// 第三步：连线打通整个系统 (建立神经网络)
+	// 第三步：连线打通整个系统
 	// ==========================================
 
 	// --- 1. 控制器 -> UI (文字上屏) ---
@@ -119,10 +119,10 @@ int main(int argc, char* argv[]) {
 
 	// 切换 ASR 引擎
 	QObject::connect(&window,&MainWindow::asrEngineSwitched,[&](bool isWhisper){
-		currentASR->stop(); // 强行拔掉旧引擎的车钥匙
+		currentASR->stop(); 
 		currentASR = isWhisper ? static_cast<IAudioTranscriber*>(&whisperEngine) : static_cast<IAudioTranscriber*>(&voskEngine);
-		if(isAsrEnabled) {
-			currentASR->start(); // 如果麦克风开着，立刻启动新引擎
+		if(isAsrEnabled) { // 如果麦克风开着，立刻启动新引擎
+			currentASR->start(); 
 		}
 	});
 

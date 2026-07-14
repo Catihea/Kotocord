@@ -31,48 +31,29 @@
 
 ## CMakeUserPresets.json — 构建预设
 
-旧设备使用 `CMakeUserPresets.json` 来保存本地路径，避免将机器相关的绝对路径提交到仓库。
+旧设备使用 `CMakeUserPresets.json` 保存本地路径。环境变量化后，可以用更简洁的方式。
+
+**旧版 (硬编码路径)：**
 
 ```json
 {
-    "version": 3,
-    "configurePresets": [
-        {
-            "name": "kotocord-msvc-local",
-            "displayName": "Local MSVC x64 with Qt6",
-            "generator": "Visual Studio 17 2022",
-            "architecture": "x64",
-            "binaryDir": "${sourceDir}/build",
-            "cacheVariables": {
-                "CMAKE_EXPORT_COMPILE_COMMANDS": true,
-                "CMAKE_PREFIX_PATH": "H:/Software/Qt/Qt6.9.3/6.9.3/msvc2022_64"
-            }
-        }
-    ],
-    "buildPresets": [
-        {
-            "name": "build-debug",
-            "configurePreset": "kotocord-msvc-local",
-            "configuration": "Debug"
-        },
-        {
-            "name": "build-release",
-            "configurePreset": "kotocord-msvc-local",
-            "configuration": "Release"
-        }
-    ]
+    "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "H:/Software/Qt/Qt6.9.3/6.9.3/msvc2022_64"
+    }
 }
 ```
 
-**关键变量解析：**
+**新版 (环境变量) — 设置一次 `setx Qt6_DIR "..."` 之后，无需此文件：**
 
-| 变量 | 作用 |
-|---|---|
-| `CMAKE_PREFIX_PATH` | 告诉 CMake 去哪找 Qt6。`find_package(Qt6 ...)` 会在此路径下搜索 `lib/cmake/Qt6*Config.cmake` |
-| `CMAKE_EXPORT_COMPILE_COMMANDS` | 生成 `compile_commands.json`，供 clangd / IntelliSense 使用 |
-| `generator: "Visual Studio 17 2022"` | 使用 VS2022 的 MSBuild 生成器（不能用 Ninja——Qt 的 AUTOMOC 需要 MSBuild 的依赖扫描） |
+```json
+{
+    "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "$penv{Qt6_DIR}"
+    }
+}
+```
 
-> **Preset vs UserPreset**：`CMakePresets.json` 放通用模板，`CMakeUserPresets.json` 放个人路径。后者被 `.gitignore` 排除，不会提交。CMake 运行时会合并两者。
+> `$penv{NAME}` 是 CMakePresets 专用的宏——在 configure 时将环境变量 `NAME` 的值注入为 CMake 变量。这意味着 Preset 文件中不包含任何机器绝对路径，可以直接提交。
 
 ---
 
@@ -196,38 +177,40 @@ option(USE_VCPKG "..." ON)
 
 ## 从旧代码迁移到双模式
 
-旧设备上 `git pull` 拉下双模式代码后，需要在一处加上 `USE_VCPKG: OFF`。
+旧设备 `git pull` 拉下环境变量化代码后：
 
-**已有 `CMakeUserPresets.json` 的情况（旧设备实录）：**
-
-```diff
-  "cacheVariables": {
-      "CMAKE_EXPORT_COMPILE_COMMANDS": true,
-      "CMAKE_PREFIX_PATH": "H:/Software/Qt/Qt6.9.3/6.9.3/msvc2022_64",
-+     "USE_VCPKG": "OFF"
-  }
-```
-
-**没有 Preset 的情况：**
+### 1. 设置环境变量
 
 ```powershell
-cp CMakePresets.json.example CMakePresets.json
-# 编辑: 保留 msvc-debug-manual, 删除 vcpkg 预设, 改 CMAKE_PREFIX_PATH
+setx Qt6_DIR "H:\Software\Qt\Qt6.9.3\6.9.3\msvc2022_64"
 ```
 
-之后构建：
+关闭重新打开终端。
+
+### 2. 选择 Preset
 
 ```powershell
-cmake --preset kotocord-msvc-local    # 预设名不变 (如果用 CMakeUserPresets.json)
-# 或
-cmake --preset msvc-debug-manual      # 如果用 CMakePresets.json
+# 使用全部手动的预设 (官方 Qt + third_party)
+cmake --preset msvc-debug-all-manual
 
-cmake --build build --config Debug
+# 或保留旧 Preset 名, 在 CMakeUserPresets.json 中加两行:
+# "USE_VCPKG_QT": "OFF", "USE_VCPKG": "OFF"
+cmake --preset kotocord-msvc-local
 ```
 
-**不需要改动的文件：**
-- `.vscode/` — 在 `.gitignore` 中，pull 不覆盖
-- `CMakeUserPresets.json` — 同上
-- `third_party/` — 同上
-- `build/` — 同上
-- `bin/` — 同上
+### 3. 构建
+
+```powershell
+cmake --build build/msvc-debug-all-manual --config Debug
+```
+
+**不需要改动的文件：** `.vscode/`、`CMakeUserPresets.json`、`third_party/`、`build/`、`bin/` 均在 `.gitignore` 中。
+
+### 旧 CMakeUserPresets.json 的兼容处理
+
+若保留旧 Preset，在 `cacheVariables` 中加两行即可：
+
+```json
+"USE_VCPKG_QT": "OFF",
+"USE_VCPKG": "OFF"
+```
